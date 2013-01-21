@@ -1,0 +1,171 @@
+# ICAL: Imputation of Catch-At-Length
+# Source code
+# V1.0
+# Carruthers and Kell Jan 2013
+
+ICCATtoGEO<-function(ICCATdat){   # Converts ICCAT format (corner closest to GMT/equator) to South West corner
+  # Take the correct resolution of longitude and latitude from the 'SquareTypeCod' column
+  Latadj<-as.numeric(array(unlist(strsplit(as.character(ICCATdat$SquareTypeCod),"x")),dim=c(2,nrow(ICCATdat)))[1,])
+  Lonadj<-as.numeric(array(unlist(strsplit(as.character(ICCATdat$SquareTypeCod),"x")),dim=c(2,nrow(ICCATdat)))[2,])
+  # cbind(as.character(ICCATdat$SquareTypeCod),Latadj,Lonadj)  # debug
+  ICCATdat<-Sdat
+  # Standardize to lower bound (only necessary if you want to force a resolution)
+  # ICCATdat$Lat<-floor(ICCATdat$Lat/Latadj)*Latadj
+  # ICCATdat$Lon<-floor(ICCATdat$Lon/Lonadj)*Lonadj
+  # Standardize cells to South Western corner
+  ICCATdat$Lat[ICCATdat$QuadID==2]<--ICCATdat$Lat[ICCATdat$QuadID==2]-Latadj[ICCATdat$QuadID==2]
+  ICCATdat$Lat[ICCATdat$QuadID==3]<--ICCATdat$Lat[ICCATdat$QuadID==3]-Latadj[ICCATdat$QuadID==3]
+  ICCATdat$Lon[ICCATdat$QuadID==3]<--ICCATdat$Lon[ICCATdat$QuadID==3]-Lonadj[ICCATdat$QuadID==3]
+  ICCATdat$Lon[ICCATdat$QuadID==4]<--ICCATdat$Lon[ICCATdat$QuadID==4]-Lonadj[ICCATdat$QuadID==4]
+  # cbind(Sdat$Lat,Sdat$Lon,Sdat$QuadID,ICCATdat$SquareTypeCod,ICCATdat$Lat,ICCATdat$Lon)[Sdat$QuadID==3,]    # debug
+  ICCATdat
+}
+
+BFTFLconv<-function(BFTdat){     # Converts other length measurement classes to FL
+   BFTdat$ClassFrq[BFTdat$FreqTypeCod=="CFL"]<-BFTdat$ClassFrq[BFTdat$FreqTypeCod=="CFL"]*0.955 # Parrack et al 1979: ICCAT conversion factors
+   BFTdat$FreqTypeCod[BFTdat$FreqTypeCod=="CFL"]<-"FL"
+   BFTdat$ClassFrq[BFTdat$FreqTypeCod=="PFFL"]<-BFTdat$ClassFrq[BFTdat$FreqTypeCod=="PFFL"]*1.348 # Turner: ICCAT conversion factors
+   BFTdat$FreqTypeCod[BFTdat$FreqTypeCod=="PFFL"]<-"FL"
+   BFTdat$ClassFrq[BFTdat$FreqTypeCod=="CPFFL"]<-(BFTdat$ClassFrq[BFTdat$FreqTypeCod=="CPFFL"]/0.955)*1.348 # Parrack et al 1979 ICCAT conversion factors
+   BFTdat$FreqTypeCod[BFTdat$FreqTypeCod=="CPFFL"]<-"FL"
+   BFTdat
+}
+
+getGandA<-function(ICCATdat){     # Returns central gravity of an ocean square an its area 
+  Latadj<-as.numeric(array(unlist(strsplit(as.character(ICCATdat$SquareTypeCod),"x")),dim=c(2,nrow(ICCATdat)))[1,])
+  Lonadj<-as.numeric(array(unlist(strsplit(as.character(ICCATdat$SquareTypeCod),"x")),dim=c(2,nrow(ICCATdat)))[2,])
+  X<-as.vector(rbind(ICCATdat$Lon,ICCATdat$Lon+Lonadj,ICCATdat$Lon+Lonadj,ICCATdat$Lon))
+  Y<-as.vector(rbind(ICCATdat$Lat,ICCATdat$Lat,ICCATdat$Lat+Latadj,ICCATdat$Lat+Latadj))
+  south<-rep(ICCATdat$Lat<0,each=4)
+  Y[Y==0&south]<--1E-10   # PBS conversions don't like zero degrees in the southern hemisphere - this leads to utter chaos.
+  PID<-rep(1:nrow(ICCATdat),each=4)
+  POS<-rep(1:4,nrow(ICCATdat))
+  polys<-as.PolySet(as.data.frame(cbind(PID,POS,X,Y)))
+  attr(polys, "projection") <- "LL"
+
+  # Convert LL to UTM so calculation makes sense
+  if(sum(as.integer(!south))>0){
+    polysN<-convUL(polys[!south,],southern=F)
+    GravN<-calcCentroid(polysN)
+    AreaN<-calcArea(polysN)
+    GravNLL<-convUL(GravN,southern=F)
+  }
+  if(sum(as.integer(south))>0){
+    polysS<-convUL(polys[south,],southern=T)
+    GravS<-calcCentroid(polysS)
+    AreaS<-calcArea(polysS)
+    GravSLL<-convUL(GravS,southern=T)
+  # Back convert gravity to LL
+  }
+
+  # Make table of gravity, make table of
+  south<-ICCATdat$Lat<0
+  Area<-rep(NA,nrow(ICCATdat))
+  if(sum(as.integer(south))>0)Area[south]<-AreaS[,2]
+  if(sum(as.integer(!south))>0)Area[!south]<-AreaN[,2]
+  Grav<-array(NA,dim=c(nrow(ICCATdat),2))
+  ind<-as.matrix(cbind((1:nrow(ICCATdat))[south],rep(1:2,each=sum(as.integer(south)))))
+  if(sum(as.integer(south))>0)Grav[ind]<-c(GravSLL$X,GravSLL$Y)
+  ind<-as.matrix(cbind((1:nrow(ICCATdat))[!south],rep(1:2,each=sum(as.integer(!south)))))
+  if(sum(as.integer(!south))>0)Grav[ind]<-c(GravNLL$X,GravNLL$Y)
+  #test<-cbind(ICCATdat$Lat,ICCATdat$Lon,as.character(ICCATdat$SquareTypeCod),Grav[,2:1],Area)
+  #GravX<-Grav[,1]
+  #GravY<-Grav[,2]
+  #cbind(ICCATdat,GravX,GravY,Area)
+  ICCATdat$Lon<-Grav[,1]
+  ICCATdat$Lat<-Grav[,2]
+  ICCATdat
+}
+
+convTime<-function(ICCATdat){     # Combines Year and TimePeriodCatch to create an continous variable representing year e.g. 1975.65
+   WYpos<-c(seq(0.5,11.5,length.out=12)/12,0.125,0.375,0.625,0.875,0.5)
+   Time<-ICCATdat$YearC+WYpos[ICCATdat$TimePeriodCatch]
+   DOY<-ceiling(as.numeric(substr(round(Time,3),6,8))*0.365)
+   cbind(ICCATdat,Time,DOY)
+}
+
+calcdist<-function(X,LonLat) deg.dist(LonLat[X,1], LonLat[X,2], LonLat[X,3], LonLat[X,4])    # sapply compatible deg.dist function
+
+dmnorm<-function (x, mean = rep(0, d), varcov, log = FALSE){    # multivariate normal function
+    d <- if (is.matrix(varcov))
+        ncol(varcov)
+    else 1
+    if (d == 1)
+        return(dnorm(x, mean, sqrt(varcov), log = log))
+    x <- if (is.vector(x))
+        matrix(x, 1, d)
+    else data.matrix(x)
+    if (is.vector(mean))
+        mean <- outer(rep(1, nrow(x)), mean)
+    if (is.matrix(mean) && (nrow(mean) != nrow(x) || ncol(mean) !=
+        ncol(x)))
+        stop("mismatch of dimensions of 'x' and 'mean'")
+    if (is.vector(mean))
+        mean <- outer(rep(1, nrow(x)), mean)
+    X <- t(x - mean)
+    conc <- pd.solve(varcov, log.det = TRUE)
+    Q <- apply((conc %*% X) * X, 2, sum)
+    log.det <- attr(conc, "log.det")
+    logPDF <- as.vector(Q + d * logb(2 * pi) + log.det)/(-2)
+    if (log)
+        logPDF
+    else exp(logPDF)
+}
+pd.solve<-function (x, silent = FALSE, log.det = FALSE){
+    if (is.null(x))
+        return(NULL)
+    if (any(is.na(x))) {
+        if (silent)
+            return(NULL)
+        else stop("NA's in x")
+    }
+    if (length(x) == 1)
+        x <- as.matrix(x)
+    if (!is.matrix(x)) {
+        if (silent)
+            return(NULL)
+        else stop("x is not a matrix")
+    }
+    if (max(abs(x - t(x))) > .Machine$double.eps) {
+        if (silent)
+            return(NULL)
+        else stop("x appears to be not symmetric")
+    }
+    x <- (x + t(x))/2
+    u <- try(chol(x, pivot = FALSE), silent = silent)
+    if (class(u) == "try-error") {
+        if (silent)
+            return(NULL)
+        else stop("x appears to be not positive definite")
+    }
+    inv <- chol2inv(u)
+    if (log.det)
+        attr(inv, "log.det") <- 2 * sum(log(diag(u)))
+    return(inv)
+}
+
+deg.dist<-function (long1, lat1, long2, lat2){                # geographic distance (km) calculator
+    rad <- pi/180
+    a1 <- lat1 * rad
+    a2 <- long1 * rad
+    b1 <- lat2 * rad
+    b2 <- long2 * rad
+    dlon <- b2 - a2
+    dlat <- b1 - a1
+    a <- (sin(dlat/2))^2 + cos(a1) * cos(b1) * (sin(dlon/2))^2
+    c <- 2 * atan2(sqrt(a), sqrt(1 - a))
+    R <- 40041.47/(2 * pi)
+    d <- R * c
+    return(d)
+}
+
+Ifun<-function(X,Ipos,Idat)(1:nrow(Ipos))[Idat$Lon[X]==Ipos$Lon & Idat$Lat[X]==Ipos$Lat]  # matching function
+Sfun<-function(X,Spos,Sdat)(1:nrow(Spos))[Sdat$Lon[X]==Spos$Lon & Sdat$Lat[X]==Spos$Lat]  # matching function
+
+# Multinomial imputation function 
+getimputes<-function(X,Sdat,Idat,weight,ndatasets)array(rep(rep(Sdat$ClassFrq,ndatasets),rmultinom(ndatasets,Idat$n[X],weight[X,])),dim=c(Idat$n[X],ndatasets))
+
+sd_tom<-function(x,na.rm=T) sqrt(var(as.vector(x), na.rm = na.rm))  # doesn't trip up on matrices / data.frames
+cna<-function(x)sum(as.integer(is.na(x)))                           # count NAs
+
+print("Source code loaded for imputation of catch-at-length ")
