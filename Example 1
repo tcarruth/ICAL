@@ -1,0 +1,80 @@
+# ICAL: Imputation of Catch-At-Length 
+==================================================================================
+# V1.0
+# 15/1/2013
+# Tom Carruthers & Laurie Kell
+# UBC              ICCAT
+# Non-parametric stochastic imputation of length composition data
+
+
+# PREREQUISITES =========================================================================================================================
+
+mydir<-"C:/CAS/CAS imp/CAS imp/" # Set working directory
+source(paste(mydir,"Source/Source CAS imp.r",sep="")) # Load source code 
+library(PBSmapping)  # Load required libraries 
+
+# MAKE DATA FOR IMPUTATION ==============================================================================================================
+#        46.8, 24.0, 5.3,  5.0,        3.5      % of total length observations by longline fleet
+fnam<-c("JPN","ESP","ITA","JPNUSAOBS","TAI")
+rawfiles<-c("CASdata_JPLL.txt","CASdata_ESPLL.txt","CASdata_ITALL.txt","CASdata_JPOBUSALL.txt","CASdata_TAILL.txt")
+fleet<-1  # pick the fleet you want to impute observations for
+
+# Import and format data -------------------------------------------------------
+Sdat<-read.csv(paste(mydir,"Data/",rawfiles[fleet],sep=""),header=T)
+Sdat<-BFTFLconv(Sdat)   # Convert CFL, PFFL and CPFFL to FL
+Sdat<-ICCATtoGEO(Sdat)  # Convert to South-West corner
+Sdat<-getGandA(Sdat)    # Calculate central gravity and area of ocean cells
+Sdat<-convTime(Sdat)    # Calculate time according to Year and TimePeriodID
+
+# Define cells for filling (using the same data Sdat as a basis for Cross Validation)
+Idat<-aggregate(Sdat$n,by=list(Sdat$Lon,Sdat$Lat,Sdat$Time,Sdat$DOY),FUN=sum)
+names(Idat)<-c("Lon","Lat","Time","DOY","n")
+
+# DO IMPUTATION =========================================================================================================================
+
+# Cross validation--------------------------------------------------------------
+CVal<-ImputeCAS(Idat,Sdat,SDspace=400,SDtime=1.5,SDseason=8,ndatasets=10,SSone=F,CrossVal=T,Meth=2) # Imputation function
+    # Sampling with replacement using Gaussian 'distance' in time and space
+    # Idat is the imputation data (to be filled)
+    # Sdat is the size data
+    # SDspace is the standard deviation in space (km)
+    # SDtime is the standard deviation in time (years)
+    # SDseason is the standard deviation within year (seasonal) (days)
+    # ndatasets is the number of replicate imputed datasets
+    # SSone is whether effective sample size should be set artificially to 1. When this is False, size observations are sampled as though they were independent and a sample of 340 fish length 100cm is 340 times more likely to be sampled than a sample of 1 fish of length 101cm.
+    # CrossVal is whether you want to use observations from the same time x area strata to fill the missing data (useful to turn this on for cross validation)
+    # Meth is the method by which weights are assigned 1: (default) additive normal 2: Multivariate normal (computationally intensive) 3: Euclidean linear
+
+# Plot a subset of the cross-validation =================================================================================================
+cond<-Idat$n>200 # Take samples above a size of 200
+muobs<-(1/Idat$n[cond])*aggregate(Sdat$ClassFrq*Sdat$n,by=list(Sdat$Lon,Sdat$Lat,Sdat$Time,Sdat$DOY),FUN=sum)[cond,5]
+mupred<-sapply(CVal,mean)[cond]
+
+# plot the fit of observed versus imputed means --------------------------------
+plotpredobs(muobs,mupred)
+
+# plot the observed versus imputed length frequencies --------------------------
+samp<-order(Idat$n,decreasing=T)  # largest samples first
+#windows()
+jpeg(paste(mydir,"/Images/length samples ES.jpg",sep=""), width=6.2, height=9, units="in", res=600)
+par(mfrow=c(10,5),mai=c(0.1,0.1,0.1,0.001),omi=c(0.15,0,0,0))
+for(j in 1:50){
+  sTime<-Idat$Time[samp[j]]
+  sLon<-Idat$Lon[samp[j]]
+  sLat<-Idat$Lat[samp[j]]
+  sampKdat<-subset(Sdat,Sdat$Time==sTime & Sdat$Lon==sLon & Sdat$Lat==sLat)      # match imputed and observed data
+  dobs<-density(rep(sampKdat$ClassFrq,sampKdat$n),adj=0.5)
+  d1<-density(CVal[[samp[j]]][,1],adj=0.5)
+  d2<-density(CVal[[samp[j]]][,2],adj=0.5)
+  d3<-density(CVal[[samp[j]]][,3],adj=0.5)
+  plot(dobs,ylim=c(0,max(dobs$y,d1$y,d2$y,d3$y)),main="",axes=F,lwd=1.1)
+  legend('topright',legend=round(c(mean(rep(sampKdat$ClassFrq,sampKdat$n)),mean(CVal[[samp[j]]])),0),text.col=c('black','orange'),bty='n')
+  mtext(paste("n = ",sum(sampKdat$n),sep=""),outer=F,side=3,line=-0.3,adj=0.2,col='black',cex=0.7)
+  cols<-c("#ff000070","#00ff0070","#0000ff70")
+  lines(d1,col=cols[1],lwd=1.3)
+  lines(d2,col=cols[2],lwd=1.3)
+  lines(d3,col=cols[3],lwd=1.3)
+}
+mtext("Length",1,line=-0.3,outer=T,cex=0.8)
+dev.off()
+
