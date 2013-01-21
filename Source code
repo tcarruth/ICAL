@@ -165,6 +165,31 @@ Sfun<-function(X,Spos,Sdat)(1:nrow(Spos))[Sdat$Lon[X]==Spos$Lon & Sdat$Lat[X]==S
 # Multinomial imputation function 
 getimputes<-function(X,Sdat,Idat,weight,ndatasets)array(rep(rep(Sdat$ClassFrq,ndatasets),rmultinom(ndatasets,Idat$n[X],weight[X,])),dim=c(Idat$n[X],ndatasets))
 
+CVEval<-function(params,Idat,Sdat,muobs,ndatasets,seed,sampsize){   # Optimizer - aims to make mean of imputed samples the same as mean of samples.. will depend on seed
+  set.seed(seed)
+  CVal<-ImputeCAS(Idat,Sdat,SDspace=exp(params[1]),SDtime=exp(params[2]),SDseason=exp(params[3]),ndatasets=ndatasets,CrossVal=T) # Imputation function
+  mupred<-sapply(CVal,mean)
+  OBJ<-sum(sampsize*((muobs-mupred)^2),na.rm=T)
+  print(paste(exp(params[1]),exp(params[2]),exp(params[3]),OBJ,sep="  "))
+  flush.console()
+  OBJ
+}
+
+plotpredobs<-function(obs,pred){
+  plot(pred,obs,main="",xlab="predicted mean length",ylab="observed mean length",col='#00003575',pch=20)
+  lines(1:1000,1:1000,col='#0000ff75')
+  abline(h=range(pred),col='#00000075')
+  dat0<-as.data.frame(cbind(obs,pred))
+  names(dat0)<-c("obs","pred")
+  legend('bottomright',legend=round(summary(lm(obs~pred,data=dat0))$r.squared,3),text.col='orange',bty='n')
+  out<-rep(NA,3)
+  out[1]<-round(summary(lm(obs~pred,data=dat0))$coefficients[2,1],3)
+  out[2]<-summary(lm(obs~pred,data=dat0))$coefficients[2,4]
+  out[3]<-round(summary(lm(obs~pred,data=dat0))$r.squared,3)
+  out
+  #legend('topleft',legend=fnam[fleet],text.col='red',bty='n')
+}
+
 sd_tom<-function(x,na.rm=T) sqrt(var(as.vector(x), na.rm = na.rm))  # doesn't trip up on matrices / data.frames
 cna<-function(x)sum(as.integer(is.na(x)))                           # count NAs
 
