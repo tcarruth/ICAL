@@ -175,7 +175,7 @@ CVEval<-function(params,Idat,Sdat,muobs,ndatasets,seed,sampsize){   # Optimizer 
   OBJ
 }
 
-plotpredobs<-function(obs,pred){
+plotpredobs<-function(obs,pred){ # Simple plot of imputed versus observed mean lengths 
   plot(pred,obs,main="",xlab="predicted mean length",ylab="observed mean length",col='#00003575',pch=20)
   lines(1:1000,1:1000,col='#0000ff75')
   abline(h=range(pred),col='#00000075')
